@@ -1,3 +1,4 @@
+import json
 import time
 
 from django.contrib import auth
@@ -15,9 +16,11 @@ except ImportError:
 from django.utils.module_loading import import_string
 from django.views.generic import View
 
-from mozilla_django_oidc.utils import (absolutify,
-                                       add_state_and_nonce_to_session,
-                                       import_from_settings)
+from .utils import (absolutify,
+                    add_state_and_nonce_to_session,
+                    import_from_settings)
+
+from .models import OIDCConfig
 
 from urllib.parse import urlencode
 
@@ -142,13 +145,17 @@ class OIDCAuthenticationRequestView(View):
 
     def __init__(self, *args, **kwargs):
         super(OIDCAuthenticationRequestView, self).__init__(*args, **kwargs)
+        self.oidc_config = None
+        self.OIDC_OP_AUTH_ENDPOINT = None
+        self.OIDC_RP_CLIENT_ID = None
 
+    def set_settings(self, oidc_config):
+        self.oidc_config = oidc_config.as_config()
         self.OIDC_OP_AUTH_ENDPOINT = self.get_settings('OIDC_OP_AUTHORIZATION_ENDPOINT')
         self.OIDC_RP_CLIENT_ID = self.get_settings('OIDC_RP_CLIENT_ID')
 
-    @staticmethod
-    def get_settings(attr, *args):
-        return import_from_settings(attr, *args)
+    def get_settings(self, attr, *args):
+        return import_from_settings(attr, *args, oidc_config=self.oidc_config)
 
     def get(self, request):
         """OIDC client authentication initialization HTTP endpoint"""
@@ -156,6 +163,8 @@ class OIDCAuthenticationRequestView(View):
         redirect_field_name = self.get_settings('OIDC_REDIRECT_FIELD_NAME', 'next')
         reverse_url = self.get_settings('OIDC_AUTHENTICATION_CALLBACK_URL',
                                         'oidc_authentication_callback')
+
+        self.set_settings(OIDCConfig.objects.first())
 
         params = {
             'response_type': 'code',
@@ -168,7 +177,11 @@ class OIDCAuthenticationRequestView(View):
             'state': state,
         }
 
-        params.update(self.get_extra_params(request))
+        extra_params = self.get_extra_params(request)
+        if extra_params:
+            if isinstance(extra_params, str):
+                extra_params = json.loads(extra_params)
+            params.update(extra_params)
 
         if self.get_settings('OIDC_USE_NONCE', True):
             nonce = get_random_string(self.get_settings('OIDC_NONCE_SIZE', 32))
