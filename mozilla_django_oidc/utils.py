@@ -20,17 +20,18 @@ def parse_www_authenticate_header(header):
     return parse_keqv_list(items)
 
 
-def import_from_settings(attr, *args):
+def import_from_settings(attr, *args, oidc_config=None):
     """
     Load an attribute from the django settings.
 
     :raises:
         ImproperlyConfigured
     """
+    config = oidc_config or settings
     try:
         if args:
-            return getattr(settings, attr, args[0])
-        return getattr(settings, attr)
+            return getattr(config, attr, args[0])
+        return getattr(config, attr)
     except AttributeError:
         raise ImproperlyConfigured('Setting {0} not found'.format(attr))
 
