@@ -3,7 +3,7 @@ import time
 
 from django.contrib import auth
 from django.core.exceptions import SuspiciousOperation
-from django.http import HttpResponseRedirect, HttpResponseNotAllowed
+from django.http import HttpResponseRedirect, HttpResponseNotAllowed, HttpResponse
 from django.urls import reverse
 from django.utils.crypto import get_random_string
 
@@ -60,6 +60,17 @@ class OIDCAuthenticationCallbackView(View):
 
     def get(self, request):
         """Callback handler for OIDC authorization code flow"""
+
+        oidc_configs = request.session.get('oidc_configs', [])
+        active_config = next(x for x in oidc_configs if x['status'] == 'active')
+        if active_config:
+            if request.GET.get('error') == 'login_required':
+                auth_url = reverse('oidc_authentication_init')
+                active_config['status'] = 'failed'
+                request.session['oidc_configs'] = oidc_configs
+                return HttpResponseRedirect(f"{auth_url}?poll-configs=1")
+            active_config['status'] = 'success'
+            request.session['oidc_configs'] = oidc_configs
 
         if request.GET.get('error'):
             # Ouch! Something important failed.
@@ -159,12 +170,35 @@ class OIDCAuthenticationRequestView(View):
 
     def get(self, request):
         """OIDC client authentication initialization HTTP endpoint"""
+
+        poll_configs = request.GET.get('poll-configs') or False
+        config = request.GET.get('config') or None
+        no_prompt = request.GET.get('no-prompt') or False
+
         state = get_random_string(self.get_settings('OIDC_STATE_SIZE', 32))
         redirect_field_name = self.get_settings('OIDC_REDIRECT_FIELD_NAME', 'next')
         reverse_url = self.get_settings('OIDC_AUTHENTICATION_CALLBACK_URL',
                                         'oidc_authentication_callback')
 
-        self.set_settings(OIDCConfig.objects.first())
+        if poll_configs:
+            oidc_configs = request.session.get('oidc_configs') \
+                           or [{'id': x, 'status': 'pending'}
+                               for x in OIDCConfig.objects.values_list('id', flat=True).order_by('id')]
+            pending_configs = [x for x in oidc_configs if x['status'] == 'pending']
+            if not pending_configs:
+                del request.session['oidc_configs']
+                request.session.modified = True
+                return HttpResponse('Unauthorized', status=401)
+            next_config = pending_configs[0]
+            next_config['status'] = 'active'
+            request.session['oidc_configs'] = oidc_configs
+            oidc_config = OIDCConfig.objects.get(id=next_config['id'])
+        elif config:
+            oidc_config = OIDCConfig.objects.get(id=config)
+        else:
+            oidc_config = None
+
+        self.set_settings(oidc_config=oidc_config)
 
         params = {
             'response_type': 'code',
@@ -182,6 +216,9 @@ class OIDCAuthenticationRequestView(View):
             if isinstance(extra_params, str):
                 extra_params = json.loads(extra_params)
             params.update(extra_params)
+
+        if poll_configs or no_prompt:
+            params['prompt'] = 'none'
 
         if self.get_settings('OIDC_USE_NONCE', True):
             nonce = get_random_string(self.get_settings('OIDC_NONCE_SIZE', 32))

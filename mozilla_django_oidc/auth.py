@@ -265,7 +265,6 @@ class OIDCAuthenticationBackend(ModelBackend):
 
     def authenticate(self, request, **kwargs):
         """Authenticates a user based on the OIDC code flow."""
-
         self.request = request
         if not self.request:
             return None
@@ -277,7 +276,14 @@ class OIDCAuthenticationBackend(ModelBackend):
         if not code or not state:
             return None
 
-        self.set_settings(oidc_config=OIDCConfig.objects.first())
+        oidc_config_id = next(x['id'] for x in request.session.get('oidc_configs')
+                              if x['status'] == 'success')
+        if oidc_config_id:
+            oidc_config = OIDCConfig.objects.get(id=oidc_config_id)
+        else:
+            oidc_config = None
+
+        self.set_settings(oidc_config=oidc_config)
 
         reverse_url = self.get_settings('OIDC_AUTHENTICATION_CALLBACK_URL',
                                         'oidc_authentication_callback')
