@@ -174,6 +174,7 @@ class OIDCAuthenticationRequestView(View):
         poll_configs = request.GET.get('poll-configs') or False
         config = request.GET.get('config') or None
         no_prompt = request.GET.get('no-prompt') or False
+        unauthorised_redirect = request.GET.get('unauthorised-redirect') or request.session.get('oidc_unauthorised_redirect')
 
         state = get_random_string(self.get_settings('OIDC_STATE_SIZE', 32))
         redirect_field_name = self.get_settings('OIDC_REDIRECT_FIELD_NAME', 'next')
@@ -188,10 +189,13 @@ class OIDCAuthenticationRequestView(View):
             if not pending_configs:
                 del request.session['oidc_configs']
                 request.session.modified = True
+                if request.session['oidc_unauthorised_redirect']:
+                    return HttpResponseRedirect(redirect_to=request.session['oidc_unauthorised_redirect'])
                 return HttpResponse('Unauthorized', status=401)
             next_config = pending_configs[0]
             next_config['status'] = 'active'
             request.session['oidc_configs'] = oidc_configs
+            request.session['oidc_unauthorised_redirect'] = unauthorised_redirect
             oidc_config = OIDCConfig.objects.get(id=next_config['id'])
         elif config:
             oidc_config = OIDCConfig.objects.get(id=config)
