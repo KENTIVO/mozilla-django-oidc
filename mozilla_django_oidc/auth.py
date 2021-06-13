@@ -16,7 +16,10 @@ from josepy.b64 import b64decode
 from josepy.jwk import JWK
 from josepy.jws import JWS, Header
 
-from mozilla_django_oidc.utils import absolutify, import_from_settings
+from .utils import absolutify, import_from_settings
+
+from .models import OIDCConfig
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,6 +48,22 @@ class OIDCAuthenticationBackend(ModelBackend):
 
     def __init__(self, *args, **kwargs):
         """Initialize settings."""
+        self.oidc_config = None
+        self.request = None
+
+        self.OIDC_OP_TOKEN_ENDPOINT = None
+        self.OIDC_OP_USER_ENDPOINT = None
+        self.OIDC_OP_JWKS_ENDPOINT = None
+        self.OIDC_RP_CLIENT_ID = None
+        self.OIDC_RP_CLIENT_SECRET = None
+        self.OIDC_RP_SIGN_ALGO = None
+        self.OIDC_RP_IDP_SIGN_KEY = None
+
+        self.UserModel = get_user_model()
+
+    def set_settings(self, oidc_config=None):
+        self.oidc_config = oidc_config.as_config()
+
         self.OIDC_OP_TOKEN_ENDPOINT = self.get_settings('OIDC_OP_TOKEN_ENDPOINT')
         self.OIDC_OP_USER_ENDPOINT = self.get_settings('OIDC_OP_USER_ENDPOINT')
         self.OIDC_OP_JWKS_ENDPOINT = self.get_settings('OIDC_OP_JWKS_ENDPOINT', None)
@@ -58,11 +77,8 @@ class OIDCAuthenticationBackend(ModelBackend):
             msg = '{} alg requires OIDC_RP_IDP_SIGN_KEY or OIDC_OP_JWKS_ENDPOINT to be configured.'
             raise ImproperlyConfigured(msg.format(self.OIDC_RP_SIGN_ALGO))
 
-        self.UserModel = get_user_model()
-
-    @staticmethod
-    def get_settings(attr, *args):
-        return import_from_settings(attr, *args)
+    def get_settings(self, attr, *args):
+        return import_from_settings(attr, *args, oidc_config=self.oidc_config)
 
     def describe_user_by_claims(self, claims):
         email = claims.get('email')
@@ -249,7 +265,6 @@ class OIDCAuthenticationBackend(ModelBackend):
 
     def authenticate(self, request, **kwargs):
         """Authenticates a user based on the OIDC code flow."""
-
         self.request = request
         if not self.request:
             return None
@@ -260,6 +275,15 @@ class OIDCAuthenticationBackend(ModelBackend):
 
         if not code or not state:
             return None
+
+        oidc_config_id = next(x['id'] for x in request.session.get('oidc_configs')
+                              if x['status'] == 'success')
+        if oidc_config_id:
+            oidc_config = OIDCConfig.objects.get(id=oidc_config_id)
+        else:
+            oidc_config = None
+
+        self.set_settings(oidc_config=oidc_config)
 
         reverse_url = self.get_settings('OIDC_AUTHENTICATION_CALLBACK_URL',
                                         'oidc_authentication_callback')
