@@ -276,10 +276,12 @@ class OIDCAuthenticationBackend(ModelBackend):
         if not code or not state:
             return None
 
-        oidc_config_id = next(x['id'] for x in request.session.get('oidc_configs')
-                              if x['status'] == 'success')
-        if oidc_config_id:
-            oidc_config = OIDCConfig.objects.get(id=oidc_config_id)
+        oidc_configs = [x['id'] for x in request.session.get('oidc_configs', [])
+                        if x['status'] == 'success']
+        if oidc_configs:
+            oidc_config = OIDCConfig.objects.get(id=oidc_configs[0]['id'])
+        elif request.session.get('oidc_config'):
+            oidc_config = OIDCConfig.objects.get(id=request.session.get('oidc_config'))
         else:
             oidc_config = None
 

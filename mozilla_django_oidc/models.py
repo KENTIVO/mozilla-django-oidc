@@ -27,6 +27,8 @@ class OIDCConfig(models.Model):
     OIDC_RP_IDP_SIGN_KEY = models.TextField(null=True, blank=True)
     OIDC_OP_JWKS_ENDPOINT = models.TextField(null=True, blank=True)
 
+    OIDC_CREATE_USER = models.BooleanField(default=False)
+
     def set_client_secret(self, secret):
         self.OIDC_RP_CLIENT_SECRET = self._fernet.encrypt(secret.encode()).decode()
 
@@ -47,7 +49,7 @@ class OIDCConfig(models.Model):
                                   f'OIDC_OP_JWKS_ENDPOINT to be configured.')
 
         for field in self._meta.fields:
-            if not getattr(self, field.name):
+            if field.null and not getattr(self, field.name):
                 setattr(self, field.name, None)
 
         super().save(*args, **kwargs)

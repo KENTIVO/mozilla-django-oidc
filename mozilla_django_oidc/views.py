@@ -30,9 +30,15 @@ class OIDCAuthenticationCallbackView(View):
 
     http_method_names = ['get']
 
-    @staticmethod
-    def get_settings(attr, *args):
-        return import_from_settings(attr, *args)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.oidc_config = None
+
+    def set_settings(self, oidc_config):
+        self.oidc_config = oidc_config.as_config()
+
+    def get_settings(self, attr, *args):
+        return import_from_settings(attr, *args, oidc_config=self.oidc_config)
 
     @property
     def failure_url(self):
@@ -62,15 +68,22 @@ class OIDCAuthenticationCallbackView(View):
         """Callback handler for OIDC authorization code flow"""
 
         oidc_configs = request.session.get('oidc_configs', [])
-        active_config = next(x for x in oidc_configs if x['status'] == 'active')
-        if active_config:
-            if request.GET.get('error') == 'login_required':
-                auth_url = reverse('oidc_authentication_init')
-                active_config['status'] = 'failed'
+        if oidc_configs:
+            active_config = next(x for x in oidc_configs if x['status'] == 'active')
+            if active_config:
+                if request.GET.get('error') == 'login_required':
+                    auth_url = reverse('oidc_authentication_init')
+                    active_config['status'] = 'failed'
+                    request.session['oidc_configs'] = oidc_configs
+                    request.session.modified = True
+                    return HttpResponseRedirect(f"{auth_url}?poll-configs=1")
+                active_config['status'] = 'success'
                 request.session['oidc_configs'] = oidc_configs
-                return HttpResponseRedirect(f"{auth_url}?poll-configs=1")
-            active_config['status'] = 'success'
-            request.session['oidc_configs'] = oidc_configs
+                request.session['oidc_config'] = active_config['id']
+                request.session.modified = True
+        elif request.session.get('oidc_config'):
+            oidc_config = OIDCConfig.objects.get(id=request.session.get('oidc_config'))
+            self.set_settings(oidc_config=oidc_config)
 
         if request.GET.get('error'):
             # Ouch! Something important failed.
@@ -199,6 +212,7 @@ class OIDCAuthenticationRequestView(View):
             oidc_config = OIDCConfig.objects.get(id=next_config['id'])
         elif config:
             oidc_config = OIDCConfig.objects.get(id=config)
+            request.session['oidc_config'] = config
         else:
             oidc_config = None
 
