@@ -295,10 +295,7 @@ class OIDCAuthenticationBackend(ModelBackend):
             'client_secret': self.OIDC_RP_CLIENT_SECRET,
             'grant_type': 'authorization_code',
             'code': code,
-            'redirect_uri': absolutify(
-                self.request,
-                reverse(reverse_url)
-            ),
+            'redirect_uri': import_from_settings('SITE_URL') + reverse(reverse_url),
         }
 
         # Get the token
