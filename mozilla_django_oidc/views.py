@@ -222,10 +222,7 @@ class OIDCAuthenticationRequestView(View):
             'response_type': 'code',
             'scope': self.get_settings('OIDC_RP_SCOPES', 'openid email'),
             'client_id': self.OIDC_RP_CLIENT_ID,
-            'redirect_uri': absolutify(
-                request,
-                reverse(reverse_url)
-            ),
+            'redirect_uri': import_from_settings('SITE_URL') + reverse(reverse_url),
             'state': state,
         }
 
