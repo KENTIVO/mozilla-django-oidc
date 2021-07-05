@@ -13,6 +13,7 @@ from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 from mozilla_django_oidc.utils import (absolutify,
                                        add_state_and_nonce_to_session,
                                        import_from_settings)
+from mozilla_django_oidc.models import OIDCConfig
 
 from urllib.parse import quote, urlencode
 
@@ -37,9 +38,14 @@ class SessionRefresh(MiddlewareMixin):
 
     def __init__(self, *args, **kwargs):
         super(SessionRefresh, self).__init__(*args, **kwargs)
+
+        self.oidc_config = None
+        self.request = None
+
+        self.OIDC_RP_CLIENT_ID = None
+        self.OIDC_OP_AUTHORIZATION_ENDPOINT = None
+
         self.OIDC_EXEMPT_URLS = self.get_settings('OIDC_EXEMPT_URLS', [])
-        self.OIDC_OP_AUTHORIZATION_ENDPOINT = self.get_settings('OIDC_OP_AUTHORIZATION_ENDPOINT')
-        self.OIDC_RP_CLIENT_ID = self.get_settings('OIDC_RP_CLIENT_ID')
         self.OIDC_STATE_SIZE = self.get_settings('OIDC_STATE_SIZE', 32)
         self.OIDC_AUTHENTICATION_CALLBACK_URL = self.get_settings(
             'OIDC_AUTHENTICATION_CALLBACK_URL',
@@ -49,9 +55,13 @@ class SessionRefresh(MiddlewareMixin):
         self.OIDC_USE_NONCE = self.get_settings('OIDC_USE_NONCE', True)
         self.OIDC_NONCE_SIZE = self.get_settings('OIDC_NONCE_SIZE', 32)
 
-    @staticmethod
-    def get_settings(attr, *args):
-        return import_from_settings(attr, *args)
+    def set_settings(self, oidc_config=None):
+        self.oidc_config = oidc_config.as_config()
+        self.OIDC_RP_CLIENT_ID = self.get_settings('OIDC_RP_CLIENT_ID')
+        self.OIDC_OP_AUTHORIZATION_ENDPOINT = self.get_settings('OIDC_OP_AUTHORIZATION_ENDPOINT')
+
+    def get_settings(self, attr, *args):
+        return import_from_settings(attr, *args, oidc_config=self.oidc_config)
 
     @cached_property
     def exempt_urls(self):
@@ -131,6 +141,18 @@ class SessionRefresh(MiddlewareMixin):
             return
 
         LOGGER.debug('id token has expired')
+
+        oidc_configs = [x['id'] for x in request.session.get('oidc_configs', [])
+                        if x['status'] == 'success']
+        if oidc_configs:
+            oidc_config = OIDCConfig.objects.get(id=oidc_configs[0]['id'])
+        elif request.session.get('oidc_config'):
+            oidc_config = OIDCConfig.objects.get(id=request.session.get('oidc_config'))
+        else:
+            oidc_config = None
+
+        self.set_settings(oidc_config=oidc_config)
+
         # The id_token has expired, so we have to re-authenticate silently.
         auth_url = self.OIDC_OP_AUTHORIZATION_ENDPOINT
         client_id = self.OIDC_RP_CLIENT_ID
@@ -141,10 +163,7 @@ class SessionRefresh(MiddlewareMixin):
         params = {
             'response_type': 'code',
             'client_id': client_id,
-            'redirect_uri': absolutify(
-                request,
-                reverse(self.OIDC_AUTHENTICATION_CALLBACK_URL)
-            ),
+            'redirect_uri': import_from_settings('SITE_URL') + reverse(self.OIDC_AUTHENTICATION_CALLBACK_URL),
             'state': state,
             'scope': self.OIDC_RP_SCOPES,
             'prompt': 'none',
